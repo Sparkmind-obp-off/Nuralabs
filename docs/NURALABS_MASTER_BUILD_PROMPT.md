@@ -2,7 +2,46 @@
 
 **Purpose:** Master execution prompt untuk AI builder (termasuk Genspark AI) agar membangun Nuralabs dari blueprint repository ini.
 
-**Product identity:** Nuralabs adalah produk milik kita sendiri. Genspark hanya digunakan sebagai implementation/build environment. Jangan menyebut Nuralabs sebagai clone Genspark dan jangan menyalin proprietary prompt, hidden instructions, UI assets, source code, atau private implementation Genspark.
+**Product identity:** Nuralabs adalah produk milik kita sendiri. Genspark hanya digunakan sebagai implementation/build environment dan reference point. Jangan menyebut Nuralabs sebagai clone Genspark dan jangan menyalin proprietary prompt, hidden instructions, UI assets, source code, atau private implementation Genspark.
+
+## 0. Strategic Product Boundary — NON-NEGOTIABLE
+
+Nuralabs **bukan proyek untuk membuat ulang Genspark**. Genspark boleh dipelajari untuk memahami mekanisme agentic yang sudah terbukti berguna, tetapi tidak menjadi product specification Nuralabs.
+
+Ambil mekanismenya bila bernilai:
+- workspace terpadu
+- planning/decomposition
+- model routing
+- tool execution
+- sandboxed execution
+- parallel work bila aman
+- reusable skills/workflows
+- artifact-first output
+- connected tools/MCP
+- progress dan execution visibility
+- cost awareness
+
+Tetapi Nuralabs harus memperbaiki failure modes kategori tersebut dengan desain milik kita sendiri:
+- **Execution Reliability:** checkpoint, resume, timeout, cancellation, bounded retry, idempotency.
+- **Trusted Context:** tenant, owner, source, timestamp, provenance, trusted/untrusted boundary.
+- **Verification:** output tidak dianggap selesai sebelum validation/evidence sesuai task.
+- **Policy & Risk:** least privilege, scopes, approval gates, dry-run, external-write controls.
+- **Model Independence:** provider gateway dan fallback; orchestration tidak bergantung pada satu model.
+- **Budget Control:** task budget, cost estimate/usage, hard limits, graceful stop.
+- **Evaluation:** regression cases dan domain evaluation set untuk mengukur kualitas nyata.
+- **Portability:** workflow, artifacts, task history, dan konfigurasi harus dapat diekspor tanpa vendor lock-in.
+
+**Decision rule:** jika ada pilihan antara (A) membuat Nuralabs lebih mirip Genspark atau (B) membuat Nuralabs lebih reliable, observable, verifiable, secure, portable, dan domain-aware, selalu pilih **B**.
+
+Nuralabs moat yang harus terus dibangun:
+1. Workflow Graph — goal → context → steps → agents/tools → evidence → artifacts → outcome.
+2. Trusted Context Layer — provenance dan isolation sebagai first-class data.
+3. Execution Reliability Layer — checkpoints, retry, idempotency, timeout, recovery.
+4. Domain Evaluation Dataset — real, ambiguous, failure, injection, tool-error, and rejection cases.
+5. Execution Memory — reusable successful workflows, bukan sekadar chat history.
+6. Portable Workflows — export/import dan provider-independent workflow definitions.
+
+Jangan mengejar feature parity seperti 100+ skills, massive connector catalog, unrestricted browser automation, complex swarm, atau visual cloning sebelum core execution loop terbukti menghasilkan outcome berulang.
 
 ## 1. Mission
 
@@ -17,17 +56,20 @@ Primary loop:
 ## 2. Product Principles
 
 1. Nuralabs is not a generic chatbot.
-2. Every meaningful task has a persistent task record and execution state.
-3. The system must expose progress and failures clearly.
-4. LLM output is untrusted until validated.
-5. External side effects require explicit permission and approval.
-6. Secrets must never appear in prompts, logs, database records, or generated artifacts.
-7. Tenant/user data must remain isolated.
-8. Every tool has a typed contract and least-privilege scope.
-9. Long-running execution must support timeout, cancellation, retry, and checkpointing.
-10. Keep provider abstractions replaceable.
-11. Do not add billing, marketplace, or large tool catalogs before the core execution loop works.
-12. Prefer the smallest production-capable architecture that can later expand.
+2. Nuralabs is not a Genspark clone.
+3. Every meaningful task has a persistent task record and execution state.
+4. The system must expose progress and failures clearly.
+5. LLM output is untrusted until validated.
+6. Evidence/provenance should be attached to claims or outputs where applicable.
+7. External side effects require explicit permission and approval.
+8. Secrets must never appear in prompts, logs, database records, or generated artifacts.
+9. Tenant/user data must remain isolated.
+10. Every tool has a typed contract and least-privilege scope.
+11. Long-running execution must support timeout, cancellation, retry, and checkpointing.
+12. Keep provider abstractions replaceable.
+13. Prefer observable state over hidden agent activity.
+14. Do not add billing, marketplace, or large tool catalogs before the core execution loop works.
+15. Prefer the smallest production-capable architecture that can later expand.
 
 ## 3. MVP Scope
 
@@ -46,6 +88,7 @@ Primary loop:
 - Basic validation
 - Basic audit trail
 - Clear prototype/safety warnings
+- Real-time or refreshable execution state
 
 ### Explicitly out of MVP
 
@@ -58,6 +101,7 @@ Primary loop:
 - Full subscription/billing implementation
 - Large connector catalog
 - Cross-tenant memory
+- Feature-parity implementation against Genspark
 
 ## 4. Preferred Architecture
 
@@ -81,10 +125,10 @@ Task Orchestrator
       v
 Execution Runtime
       |
-      +--> Sandboxed Code Execution
+      +--> Sandbox Provider Adapter
       |
       v
-Validator
+Validator / Evidence Layer
       |
       +--> Artifact Store
       +--> Audit Log
@@ -104,6 +148,36 @@ Use the repository's current Cloudflare-oriented architecture as the default dir
 - Sandbox: use E2B if its available API and current plan are suitable. Create a provider interface so another sandbox provider can replace it later.
 - Model providers: use provider adapters rather than embedding provider-specific calls throughout business logic.
 - File/artifact storage: use an abstraction with metadata and provenance.
+
+### Sandbox requirement
+
+The sandbox is not a mock terminal. The MVP must execute code in a real isolated runtime through the sandbox provider adapter.
+
+For the first implementation, implement an **E2B adapter** when the current E2B API/SDK can be verified. The adapter must expose a Nuralabs-owned interface such as:
+
+```text
+SandboxProvider
+  createSession()
+  writeFiles()
+  execute()
+  readFiles()
+  getLogs()
+  kill()
+  destroy()
+```
+
+The orchestrator must depend on `SandboxProvider`, not directly on E2B SDK calls.
+
+The E2B adapter must:
+- create an isolated execution environment
+- run generated code/commands inside that environment
+- capture stdout/stderr and exit status
+- enforce timeout/resource boundaries where supported
+- support cleanup/destroy
+- normalize provider errors into Nuralabs execution errors
+- never expose E2B credentials to the browser
+
+If E2B cannot be verified/configured, do **not** fake successful execution. Keep the provider interface, provide a clearly marked local/test adapter only for automated tests, and mark E2B integration as pending configuration.
 
 If a proposed technology is unavailable, deprecated, requires paid infrastructure unexpectedly, or conflicts with the current repository, STOP and explain the trade-off before silently changing the architecture.
 
@@ -157,6 +231,8 @@ At minimum implement:
 - metadata
 - timestamp
 
+For sandbox execution, store normalized execution metadata, not secrets or unrestricted raw provider payloads.
+
 Do not store raw secrets. Redact sensitive values in logs.
 
 ## 7. Task State Machine
@@ -174,6 +250,8 @@ Failure/cancellation paths:
 `validating → failed`
 
 Do not rely on a single boolean such as `is_running`.
+
+Long-running tasks must have a recoverable checkpoint/state boundary so a process interruption does not require silently starting from zero.
 
 ## 8. Tool Contract
 
@@ -250,7 +328,7 @@ Implement this exact conceptual loop:
 5. Generate plan.
 6. Persist plan.
 7. Request approval if required.
-8. Execute each step.
+8. Execute each step through a registered tool/provider adapter.
 9. Persist step result.
 10. On recoverable failure, retry within a strict limit.
 11. Feed normalized error/result back to the model only when useful.
@@ -259,11 +337,13 @@ Implement this exact conceptual loop:
 14. Mark task completed or failed.
 15. Show an auditable execution summary to the user.
 
+Never mark a task `completed` solely because a model returned text. Completion requires the applicable validation/evidence checks to pass.
+
 ## 12. Coding Use Case for Dogfood
 
 The first end-to-end workflow is:
 
-> User describes a small coding/script task → Nuralabs generates code → code runs in isolated sandbox → errors are returned to the model for bounded correction → final code + execution output are shown.
+> User describes a small coding/script task → Nuralabs generates code → code runs in an isolated sandbox → errors are returned to the model for bounded correction → final code + execution output are shown.
 
 Example:
 
@@ -277,7 +357,10 @@ The system must return:
 - retry count
 - final result
 - artifact/download reference when applicable
+- sandbox execution metadata suitable for audit
 - warning that generated code should be reviewed before production use
+
+This coding workflow is **dogfood for the execution engine**, not Nuralabs' final market positioning.
 
 ## 13. Safety and Trust
 
@@ -294,6 +377,7 @@ Implement these from the first working version:
 - tenant scoping
 - prompt-injection-aware separation between instructions and untrusted content
 - no automatic external side effects
+- provenance for important generated artifacts/results
 
 Autonomy defaults to Level 1 (draft/prepare). Any future write action must require explicit permission and appropriate scope.
 
@@ -306,11 +390,12 @@ Minimum screens/components:
 1. Workspace/task input
 2. Current task status
 3. Execution step timeline
-4. Tool/model activity
+4. Tool/model/sandbox activity
 5. Error/retry visibility
 6. Final result/artifact viewer
 7. Basic task history
 8. Audit/execution summary
+9. Validation/evidence status where applicable
 
 Avoid fake progress. Every displayed step should correspond to real backend state.
 
@@ -331,6 +416,8 @@ The MVP is accepted only when all are true:
 - Secrets are not exposed in client code or logs.
 - Two users/tenants cannot access each other's task records.
 - Generated code is clearly labeled as AI-generated and requiring review for production use.
+- The sandbox provider is behind a Nuralabs-owned adapter interface.
+- No fake E2B/sandbox success path is used in production.
 
 ## 16. Engineering Quality Gates
 
@@ -343,6 +430,7 @@ Before declaring the MVP complete, run:
 - planner output validation tests
 - retry tests
 - timeout/failure tests
+- sandbox adapter tests
 - authorization/tenant-isolation tests
 - build test
 - deployment/preview test
@@ -361,6 +449,7 @@ Work in phases and keep each phase independently testable.
 - configure environment contract
 - implement health endpoint
 - implement database connection
+- define provider interfaces
 
 ### Phase B — Task Core
 
@@ -377,18 +466,21 @@ Work in phases and keep each phase independently testable.
 - planner
 - persisted execution plan
 
-### Phase D — Sandbox Execution
+### Phase D — Real Sandbox Execution
 
 - tool registry
+- `SandboxProvider` interface
 - E2B adapter
 - code execution
 - timeout
 - retry
 - normalized errors
+- cleanup/destroy
 
 ### Phase E — Validation + Artifacts
 
 - validator
+- evidence/provenance metadata
 - artifact metadata
 - result viewer
 - audit events
@@ -401,6 +493,7 @@ Work in phases and keep each phase independently testable.
 - secret redaction
 - failure-path testing
 - deployment verification
+- checkpoint/recovery verification
 
 Do not jump to marketplace, billing, or advanced agents before Phase F passes.
 
@@ -414,6 +507,8 @@ Do not jump to marketplace, billing, or advanced agents before Phase F passes.
 - Do not commit `.env` files containing secrets.
 - Keep provider-specific code behind adapters.
 - Keep the application deployable after each major phase.
+- Do not add feature parity work merely because Genspark has that feature.
+- Every new feature must state which measurable outcome it improves: completion, acceptance, evidence, intervention, cost, reuse, safety, or portability.
 
 ## 19. Output Required From the Builder
 
@@ -426,6 +521,7 @@ At the end of each implementation phase, report:
 5. test results
 6. known limitations
 7. exact next phase
+8. which Nuralabs moat/reliability property was strengthened
 
 Do not fabricate integrations. If an external API cannot be verified, create a clean adapter boundary and mark it as pending configuration.
 
@@ -433,8 +529,10 @@ Do not fabricate integrations. If an external API cannot be verified, create a c
 
 Build Nuralabs as an original, reliable AI execution product inspired by general agentic-workspace patterns, not as a proprietary Genspark clone.
 
+Genspark is an implementation environment/reference only. It is **not** the Nuralabs product specification.
+
 Optimize for:
 
-**real execution → verifiable output → auditability → reliability → reuse → scale.**
+**real execution → verifiable output → auditability → reliability → reuse → portability → domain advantage → scale.**
 
 When there is a conflict between adding a feature and making the execution loop reliable, choose reliability.
